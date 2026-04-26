@@ -77,38 +77,52 @@ async function runWithGemini(userMessage: string): Promise<AssistantResult> {
 
 async function runWithNim(userMessage: string): Promise<AssistantResult> {
   const apiKey = getEnv("NVIDIA_NIM_API_KEY");
-  const model = process.env.NVIDIA_NIM_MODEL ?? "meta/llama-3.1-70b-instruct";
+  const configuredModel = process.env.NVIDIA_NIM_MODEL;
+  const models = [
+    configuredModel,
+    "meta/llama-3.1-8b-instruct",
+    "meta/llama-3.1-70b-instruct",
+    "nvidia/llama-3.1-nemotron-70b-instruct",
+  ].filter((model): model is string => Boolean(model));
 
-  const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: AGENT_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-    }),
-  });
+  let lastError = "Unknown NIM error";
+  for (const model of models) {
+    const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        messages: [
+          { role: "system", content: AGENT_PROMPT },
+          { role: "user", content: userMessage },
+        ],
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`NVIDIA NIM request failed: ${errorText}`);
+    if (!response.ok) {
+      lastError = await response.text();
+      continue;
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const raw = data.choices?.[0]?.message?.content;
+    if (!raw) {
+      lastError = `Model ${model} returned empty content`;
+      continue;
+    }
+
+    return normalizeAssistantResult(raw);
   }
 
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const raw = data.choices?.[0]?.message?.content;
-  if (!raw) {
-    throw new Error("NVIDIA NIM returned an empty response.");
-  }
-
-  return normalizeAssistantResult(raw);
+  throw new Error(
+    `NVIDIA NIM request failed: ${lastError}. Check NVIDIA_NIM_API_KEY and NVIDIA_NIM_MODEL in environment variables.`,
+  );
 }
 
 function normalizeAssistantResult(raw: string): AssistantResult {
