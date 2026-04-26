@@ -21,7 +21,10 @@ export function getOptionalEnv(key: string): string | undefined {
 }
 
 export function getAiProvider(): "gemini" | "nim" {
-  const provider = getOptionalEnv("AI_PROVIDER")?.toLowerCase() ?? "gemini";
+  const configured = getOptionalEnv("AI_PROVIDER")?.toLowerCase();
+  const provider =
+    configured ??
+    (getOptionalEnv("NVIDIA_NIM_API_KEY") ? "nim" : "gemini");
   if (provider !== "gemini" && provider !== "nim") {
     throw new Error('AI_PROVIDER must be either "gemini" or "nim".');
   }
